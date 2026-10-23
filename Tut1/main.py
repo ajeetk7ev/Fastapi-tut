@@ -1,5 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from schemas import PostCreate
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from datetime import date
 app = FastAPI()
 
 posts:list[dict] =  [
@@ -75,20 +79,85 @@ posts:list[dict] =  [
     }
 ]
 
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(
+    request: Request,
+    exc: RequestValidationError
+):
+    errors = {}
+
+    for error in exc.errors():
+        field = str(error["loc"][-1])
+        error_type = error["type"]
+        ctx = error.get("ctx", {})
+
+        if error_type == "missing":
+            message = f"{field} is required"
+
+        elif error_type == "string_too_short":
+            message = (
+                f"{field} must be at least "
+                f"{ctx.get('min_length')} characters"
+            )
+
+        elif error_type == "string_too_long":
+            message = (
+                f"{field} must not exceed "
+                f"{ctx.get('max_length')} characters"
+            )
+
+        elif error_type == "greater_than":
+            message = f"{field} must be greater than {ctx.get('gt')}"
+
+        elif error_type == "less_than":
+            message = f"{field} must be less than {ctx.get('lt')}"
+
+        else:
+            message = f"Invalid value for {field}"
+
+        errors[field] = message
+
+    return JSONResponse(
+        status_code=422,
+        content={
+            "success": False,
+            "message": "Validation error",
+            "errors": errors
+        }
+    )
+
 @app.get("/")
 def read_root():
     return {"Hello": "World from Windows"}
 
 
+@app.post("/api/v1/posts")
+def create_post(post:PostCreate):
+    new_post = post.model_dump()
+
+    new_post["id"] = len(posts) + 1
+    posts.append(new_post)
+
+    
+    return JSONResponse(
+        status_code=201,
+        content=jsonable_encoder({
+            "success" : True,
+            "message":"Post created",
+            "data":posts[len(posts)-1]
+        })
+    )
+
 @app.get("/api/v1/posts")
 def get_posts():
    return JSONResponse(
         status_code=200,
-        content={
+        content=jsonable_encoder({
             "success": True,
             "message": "Posts fetched successfully",
             "data": posts
-        }
+        })
     )
    
 
@@ -98,11 +167,11 @@ def get_post(id:int):
         if post.get("id") == id:
             return JSONResponse(
                     status_code=200,
-                    content={
+                    content=jsonable_encoder({
                         "success": True,
                         "message": "Posts fetched successfully",
                         "data": post
-                    }
+                    })
                 )
             
     return JSONResponse(
